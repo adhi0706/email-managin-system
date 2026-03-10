@@ -2,34 +2,11 @@ import express from 'express';
 import nodemailer from 'nodemailer';
 import multer from 'multer';
 import { requireAuth } from '../middleware/auth.js';
-import OpenAI from 'openai';
 
 let memoryDrafts = [];
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
-
-// Generate email using AI
-router.post('/generate', requireAuth, async (req, res) => {
-    try {
-        const { prompt } = req.body;
-
-        if (!process.env.AI_API_KEY) {
-            return res.status(500).json({ error: 'AI_API_KEY is missing from environment variables.' });
-        }
-
-        const openai = new OpenAI({ apiKey: process.env.AI_API_KEY });
-
-        const completion = await openai.chat.completions.create({
-            messages: [{ role: 'user', content: `Generate a professional email based on this description: ${prompt}. Leave placeholders like {{name}}, {{email}}, or {{company}} if needed.` }],
-            model: 'gpt-3.5-turbo',
-        });
-
-        res.json({ generatedContent: completion.choices[0].message.content });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
 
 // Delay helper to create a pause between each batch execution
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));

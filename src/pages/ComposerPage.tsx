@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api';
-import { Sparkles, Save, Trash2, Send, Plus, X, CheckCircle, AlertCircle, Loader, Paperclip } from 'lucide-react';
+import { Save, Trash2, Send, Plus, X, CheckCircle, AlertCircle, Loader, Paperclip } from 'lucide-react';
 
 interface Draft {
   _id: string;
@@ -29,11 +29,8 @@ export default function ComposerPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClients, setSelectedClients] = useState<Set<string>>(new Set());
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
-  const [aiPrompt, setAiPrompt] = useState('');
-  const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [showAiModal, setShowAiModal] = useState(false);
   const [selectionMode, setSelectionMode] = useState<'checkbox' | 'range' | 'slno'>('checkbox');
   const [rangeStart, setRangeStart] = useState('');
   const [rangeEnd, setRangeEnd] = useState('');
@@ -65,31 +62,6 @@ export default function ComposerPage() {
     }
   };
 
-  const handleGenerateWithAI = async () => {
-    if (!aiPrompt.trim()) {
-      setMessage({ type: 'error', text: 'Please enter a prompt' });
-      return;
-    }
-
-    setLoading(true);
-    setMessage(null);
-
-    try {
-      const response = await api.post('/emails/generate', { prompt: aiPrompt });
-      setSubject('AI Generated Email');
-      setBody(response.data.generatedContent || '');
-      setShowAiModal(false);
-      setAiPrompt('');
-      setMessage({ type: 'success', text: 'Email generated successfully!' });
-    } catch (error: any) {
-      setMessage({
-        type: 'error',
-        text: error.response?.data?.error || error.message || 'Failed to generate email',
-      });
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleSaveDraft = async () => {
     if (!subject.trim() || !body.trim()) {
@@ -123,41 +95,82 @@ export default function ComposerPage() {
     }
   };
 
-  const handleSelectByRange = () => {
+  const handleSelectByRange = async () => {
     const start = parseInt(rangeStart);
     const end = parseInt(rangeEnd);
 
     if (isNaN(start) || isNaN(end) || start > end) {
-      setMessage({ type: 'error', text: 'Invalid range' });
+      setMessage({ type: 'error', text: 'Invalid range: Start SL No must be less than or equal to End SL No' });
       return;
     }
 
+    // Reload clients if not yet loaded (e.g. backend was down on page load)
+    let currentClients = clients;
+    if (currentClients.length === 0) {
+      try {
+        const response = await api.get('/clients');
+        currentClients = response.data || [];
+        setClients(currentClients);
+      } catch {
+        setMessage({ type: 'error', text: 'Could not load clients. Make sure the backend server is running.' });
+        return;
+      }
+    }
+
     const newSelected = new Set<string>();
-    clients.forEach(client => {
+    currentClients.forEach(client => {
       if (client.slno >= start && client.slno <= end) {
         newSelected.add(client._id);
       }
     });
 
     setSelectedClients(newSelected);
+
+    if (newSelected.size === 0) {
+      setMessage({ type: 'error', text: `No clients found in SL No range ${start}–${end}` });
+    } else {
+      setMessage({ type: 'success', text: `Selected ${newSelected.size} client${newSelected.size !== 1 ? 's' : ''} in range ${start}–${end}` });
+    }
   };
 
-  const handleSelectBySlno = () => {
+  const handleSelectBySlno = async () => {
     const slnos = slnoInput.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
 
     if (slnos.length === 0) {
-      setMessage({ type: 'error', text: 'Invalid SL numbers' });
+      setMessage({ type: 'error', text: 'Please enter valid SL numbers separated by commas (e.g. 1, 3, 5)' });
       return;
     }
 
+    // Reload clients if not yet loaded (e.g. backend was down on page load)
+    let currentClients = clients;
+    if (currentClients.length === 0) {
+      try {
+        const response = await api.get('/clients');
+        currentClients = response.data || [];
+        setClients(currentClients);
+      } catch {
+        setMessage({ type: 'error', text: 'Could not load clients. Make sure the backend server is running.' });
+        return;
+      }
+    }
+
     const newSelected = new Set<string>();
-    clients.forEach(client => {
+    currentClients.forEach(client => {
       if (slnos.includes(client.slno)) {
         newSelected.add(client._id);
       }
     });
 
     setSelectedClients(newSelected);
+
+    const notFound = slnos.filter(n => !currentClients.some(c => c.slno === n));
+    if (newSelected.size === 0) {
+      setMessage({ type: 'error', text: `No clients found with SL No: ${slnos.join(', ')}` });
+    } else if (notFound.length > 0) {
+      setMessage({ type: 'success', text: `Selected ${newSelected.size} client${newSelected.size !== 1 ? 's' : ''}. SL No not found: ${notFound.join(', ')}` });
+    } else {
+      setMessage({ type: 'success', text: `Selected ${newSelected.size} client${newSelected.size !== 1 ? 's' : ''}` });
+    }
   };
 
   const handleSendEmails = async () => {
@@ -465,56 +478,93 @@ export default function ComposerPage() {
             </div>
 
             {selectionMode === 'range' && (
-              <div className="mb-4 flex gap-2 items-end">
-                <div className="flex-1">
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Start SL No</label>
-                  <input
-                    type="number"
-                    value={rangeStart}
-                    onChange={(e) => setRangeStart(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                    placeholder="1"
-                  />
+              <div className="mb-4 space-y-3">
+                <div className="flex gap-2 items-end">
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium text-gray-700 mb-1">Start SL No</label>
+                    <input
+                      type="number"
+                      value={rangeStart}
+                      onChange={(e) => setRangeStart(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                      placeholder="1"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium text-gray-700 mb-1">End SL No</label>
+                    <input
+                      type="number"
+                      value={rangeEnd}
+                      onChange={(e) => setRangeEnd(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                      placeholder="10"
+                    />
+                  </div>
+                  <button
+                    onClick={handleSelectByRange}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+                  >
+                    Apply
+                  </button>
                 </div>
-                <div className="flex-1">
-                  <label className="block text-xs font-medium text-gray-700 mb-1">End SL No</label>
-                  <input
-                    type="number"
-                    value={rangeEnd}
-                    onChange={(e) => setRangeEnd(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                    placeholder="10"
-                  />
-                </div>
-                <button
-                  onClick={handleSelectByRange}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-                >
-                  Apply
-                </button>
+                {selectedClients.size > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-gray-600 mb-2">
+                      {selectedClients.size} client{selectedClients.size !== 1 ? 's' : ''} selected:
+                    </p>
+                    <div className="max-h-48 overflow-y-auto space-y-1">
+                      {clients.filter(c => selectedClients.has(c._id)).map(client => (
+                        <div key={client._id} className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-100 rounded-lg text-sm">
+                          <span className="text-blue-700 font-medium w-8">#{client.slno}</span>
+                          <span className="text-gray-800 flex-1">{client.name}</span>
+                          <span className="text-gray-500 text-xs">{client.email}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
             {selectionMode === 'slno' && (
-              <div className="mb-4 flex gap-2 items-end">
-                <div className="flex-1">
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    SL Numbers (comma-separated)
-                  </label>
-                  <input
-                    type="text"
-                    value={slnoInput}
-                    onChange={(e) => setSlnoInput(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                    placeholder="1, 5, 10, 15"
-                  />
+              <div className="mb-4 space-y-3">
+                <div className="flex gap-2 items-end">
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium text-gray-700 mb-1">
+                      SL Numbers (comma-separated)
+                    </label>
+                    <input
+                      type="text"
+                      value={slnoInput}
+                      onChange={(e) => setSlnoInput(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                      placeholder="1, 5, 10, 15"
+                      onKeyDown={(e) => e.key === 'Enter' && handleSelectBySlno()}
+                    />
+                  </div>
+                  <button
+                    onClick={handleSelectBySlno}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+                  >
+                    Apply
+                  </button>
                 </div>
-                <button
-                  onClick={handleSelectBySlno}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
-                >
-                  Apply
-                </button>
+                {selectedClients.size > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-gray-600 mb-2">
+                      {selectedClients.size} client{selectedClients.size !== 1 ? 's' : ''} selected:
+                    </p>
+                    <div className="max-h-48 overflow-y-auto space-y-1">
+                      {clients.filter(c => selectedClients.has(c._id)).map(client => (
+                        <div key={client._id} className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-100 rounded-lg text-sm">
+                          <span className="text-blue-700 font-medium w-8">#{client.slno}</span>
+                          <span className="text-gray-800 flex-1">{client.name}</span>
+                          <span className="text-gray-500 text-xs">{client.email}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -578,62 +628,7 @@ export default function ComposerPage() {
         </div>
       </div>
 
-      {showAiModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-gray-900">Generate Email with AI</h3>
-              <button
-                onClick={() => setShowAiModal(false)}
-                className="text-gray-500 hover:bg-gray-100 p-2 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Describe the email you want to create
-                </label>
-                <textarea
-                  value={aiPrompt}
-                  onChange={(e) => setAiPrompt(e.target.value)}
-                  rows={4}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-                  placeholder="E.g., Create a professional email introducing our new product to potential clients"
-                />
-              </div>
-
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowAiModal(false)}
-                  className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleGenerateWithAI}
-                  disabled={loading}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg font-medium hover:from-purple-700 hover:to-blue-700 transition-all disabled:opacity-50"
-                >
-                  {loading ? (
-                    <>
-                      <Loader className="w-5 h-5 animate-spin" />
-                      Generating...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-5 h-5" />
-                      Generate
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
