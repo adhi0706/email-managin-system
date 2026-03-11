@@ -21,6 +21,7 @@
     "multer": "^2.1.0",
     "nodemailer": "^8.0.1",
     "openai": "^6.25.0",
-    "serverless-http": "^4.0.0"
+    "serverless-http": "^4.0.0",
+    "vite-react-typescript-starter": "file:.."
   }
 }
