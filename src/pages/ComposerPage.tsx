@@ -211,10 +211,10 @@ export default function ComposerPage() {
       });
 
       const isError = response.data.failed > 0;
+      const firstError = response.data.errors?.[0]?.error || '';
       setMessage({
         type: isError ? 'error' : 'success',
-        text: `Campaign completed. Sent: ${response.data.sent}, Failed: ${response.data.failed}. ${isError ? 'Check server .env email credentials.' : ''
-          }`,
+        text: `Campaign completed. Sent: ${response.data.sent}, Failed: ${response.data.failed}.${isError ? ` Error: ${firstError}` : ''}`,
       });
       if (!isError) {
         setSelectedClients(new Set());

@@ -22,3 +22,9 @@ dist-ssr
 *.sw?
 .env
 server/.env
+
+# build artifacts and temp files
+*.zip
+test-email.mjs
+server/test-smtp.mjs
+backend/

@@ -35,14 +35,20 @@ router.post('/send', requireAuth, upload.array('attachments'), async (req, res) 
         return res.status(400).json({ error: 'Maximum 100 emails per batch limit exceeded' });
     }
 
-    // Use the admin's credential mappings
+    // Use explicit SMTP settings — works for Gmail and Google Workspace custom domains
     const transporter = nodemailer.createTransport({
-        service: 'gmail', // you can change service based on requirement
+        host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+        port: parseInt(process.env.EMAIL_PORT || '587'),
+        secure: false, // true for 465, false for 587 (STARTTLS)
         auth: {
             user: process.env.EMAIL_USER,
             pass: process.env.EMAIL_PASS
+        },
+        tls: {
+            rejectUnauthorized: false
         }
     });
+
 
     let sentCount = 0;
     let failedCount = 0;
@@ -73,8 +79,10 @@ router.post('/send', requireAuth, upload.array('attachments'), async (req, res) 
         try {
             await transporter.sendMail(mailOptions);
             sentCount++;
-            // Wait for specified delay
-            await delay(delayMs);
+            // Wait for specified delay (skip delay after the last email)
+            if (client !== clients[clients.length - 1]) {
+                await delay(delayMs);
+            }
         } catch (error) {
             failedCount++;
             failureLogs.push({ client: client.email, error: error.message });
